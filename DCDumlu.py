@@ -16,6 +16,8 @@ import uactable
 import usage
 import log
 
+import subprocess
+import re
 
 class dcDumlu():
 
@@ -236,24 +238,37 @@ class dcDumlu():
             print('[-] Trust relationship is not defined!')        
             
     def enumHosts(self, c):
-        # enum all hosts without DCs
-        # domain controller: search_filter='(&(objectCategory=Computer)(userAccountControl:1.2.840.113556.1.4.803:=8192))'
+        # enum hosts
+        def getIPFromHostname(hostname):
+            # get hosts ip
+            try:
+                response = subprocess.check_output(['ping', '-n', '3', hostname], stderr=subprocess.STDOUT, universal_newlines=True)
+                ip_match = re.search(r'\[([0-9]+(?:\.[0-9]+){3})\]', response)
+                if ip_match:
+                    return ip_match.group(1)
+                else:
+                    return 'IP not found'
+            except subprocess.CalledProcessError:
+                return 'Ping failed'
+        
         total_entries = 0
         entry_generator = c.extend.standard.paged_search(search_base=self.searchBaseName,
-                                                         search_filter='(objectCategory=Computer)',
-                                                         search_scope=SUBTREE,
-                                                         attributes=['cn', 'operatingSystem', 'operatingSystemVersion', 'logonCount',
-                                                                     'lastLogon'],
-                                                         paged_size=None,
-                                                         generator=True)
+                                                        search_filter='(objectCategory=Computer)',
+                                                        search_scope=SUBTREE,
+                                                        attributes=['cn', 'operatingSystem', 'operatingSystemVersion', 'logonCount',
+                                                                    'lastLogon'],
+                                                        paged_size=None,
+                                                        generator=True)
 
         print("[*] Computers of " + self.domainName + " domain: \n")
-        table = PrettyTable(['Computer Name', 'Operating System',  'Version', 'Logon Count', 'Last Logon Time'])
+        table = PrettyTable(['Computer Name', 'IP Address', 'Operating System', 'Version', 'Logon Count', 'Last Logon Time'])
         table.align = "l"
         for entry in entry_generator:
             if 'dn' in entry:
-                table.add_row([entry['attributes']['cn'], entry['attributes']['operatingSystem'],
-                               entry['attributes']['operatingSystemVersion'], entry['attributes']['logonCount'], entry['attributes']['lastLogon']])
+                hostname = entry['attributes']['cn']
+                ip_address = getIPFromHostname(hostname)
+                table.add_row([hostname, ip_address, entry['attributes']['operatingSystem'],
+                            entry['attributes']['operatingSystemVersion'], entry['attributes']['logonCount'], entry['attributes']['lastLogon']])
                 total_entries += 1
         if total_entries > 0:
             print(table)
