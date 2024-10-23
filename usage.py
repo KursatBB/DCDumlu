@@ -35,6 +35,7 @@ def Helper():
     helpTable.add_row(["delAsRepRoasting", "Set user option as Kerberos preauthentication is required"])
     helpTable.add_row(["resetObject", "Change userAccountControl attribute of object to reset modifications that are Kerberos delegation attacks"])
     helpTable.add_row(["uacTable", "Show values for userAccountControl attribute if you need for resetObject operation"])
+    helpTable.add_row(["enumMSSQL","Enumerate MSSQL servers on domain"])
     helpTable.add_row(["checkConnection", "Get connection details"])
     helpTable.add_row(["help", "Print usage"])
     helpTable.add_row(["?", "Print usage"])

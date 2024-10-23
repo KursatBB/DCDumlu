@@ -31,20 +31,6 @@ class dcDumlu():
 
     def main(self):
 
-        # define the server and the connection
-        s = Server(self.server, get_info=ALL)
-        c = Connection(s, user=self.domainName + "\\" + self.username, password=self.password, authentication=NTLM)
-        # Hash format | LM:NT hash or NT:NT hash
-        # perform the Bind operation
-        if not c.bind():
-            if c.result["description"] == "invalidCredentials":
-                print('[-] Username or password is incorrect.')
-            else:
-                print('[-] Error in bind', c.result)
-            sys.exit(1)
-        else:
-            print('[+] Connection established...')
-
         if self.operation == "getDomainInfo":
             self.getDomainInfo(c)
 
@@ -170,7 +156,10 @@ class dcDumlu():
             print('[*] Example CN: unsafe inline')
             objDn = input('[*] Object CN: ')
             self.resetObject(c, objDn)
-
+            
+        elif self.operation == "enumMSSQL":
+            self.enumMSSQL(c) 
+            
         elif self.operation == "help" or self.operation == "?":
             usage.Helper()
 
@@ -1001,6 +990,41 @@ class dcDumlu():
         else:
             print('[!] To change value of userAccountControl you must specify one user/computer account!')
 
+    def enumMSSQL(self, c):
+        # LDAP search filter to find MS SQL Servers
+        total_entries = 0
+        entry_generator = c.extend.standard.paged_search(
+            search_base=self.searchBaseName,
+            search_filter='(&(objectClass=computer)(servicePrincipalName=MSSQLSvc*))',
+            search_scope=SUBTREE,
+            attributes=['cn', 'operatingSystem', 'servicePrincipalName', 'sAMAccountName'],
+            paged_size=None,
+            generator=True
+        )
+
+        print("[*] MS SQL Servers in the " + self.domainName + " domain: \n")
+        table = PrettyTable(['SQL Server Name', 'Operating System', 'Service Principal Name (SPN)', 'Associated Account'])
+        table.max_width["Service Principal Name (SPN)"] = 50
+
+        table.align = "l"
+
+        for entry in entry_generator:
+            if 'dn' in entry:
+                table.add_row([
+                    entry['attributes']['cn'],
+                    entry['attributes'].get('operatingSystem', 'Unknown'),
+                    entry['attributes'].get('servicePrincipalName', 'No SPN'),
+                    entry['attributes'].get('sAMAccountName', 'No Account')
+                ])
+                total_entries += 1
+
+        if total_entries > 0:
+            print(table)
+            print('[+] Total MS SQL Servers found: ', total_entries)
+            log.logOperation(self.operation, table)
+        else:
+            print('[-] No MS SQL Servers found!')
+
 
 count = 0
 while True:
@@ -1011,24 +1035,20 @@ while True:
             banner.dumlupinar()
             server = input('[*] IP address of DC: ')
             domainName = input('[*] Domain name: ')
-            username = input('[*] Username: ')
-            password = getpass.getpass(prompt='[*] Password or NT Hash: ', stream=None)
-            # Getting searchbase name
             searchBase = domainName.split('.')
             size = len(searchBase)
+
+            # Domain adının parçalanıp search base oluşturulması
             if size < 2:
                 print("[-] Provide domain's DNS name! Example: unsafe.local")
                 continue
-            elif size < 3:
+            elif size == 2:
                 searchBaseName = 'DC=' + searchBase[0] + ',DC=' + searchBase[1]
-            elif size < 4:
+            elif size == 3:
                 searchBaseName = 'DC=' + searchBase[0] + ',DC=' + searchBase[1] + ',DC=' + searchBase[2]
-            elif size < 5:
+            elif size == 4:
                 searchBaseName = 'DC=' + searchBase[0] + ',DC=' + searchBase[1] + ',DC=' + searchBase[2] + ',DC=' + \
                                  searchBase[3]
-            elif size < 6:
-                searchBaseName = 'DC=' + searchBase[0] + ',DC=' + searchBase[1] + ',DC=' + searchBase[2] + ',DC=' + \
-                                 searchBase[3] + ',DC=' + searchBase[4]
             else:
                 print("[-] Unexpected domain name!")
                 sys.exit(1)
@@ -1037,27 +1057,52 @@ while True:
                 print("[-] IP address of DC is required!")
                 continue
 
+        # Kullanıcı adı ve şifreyi sorma ve doğrulama işlemi
+        is_authenticated = False
+        while not is_authenticated:
+            if count == 0:
+                username = input('[*] Username: ')
+                password = getpass.getpass(prompt='[*] Password or NT Hash: ', stream=None)
+
             if not password or not username:
                 print("[-] Password/NT Hash or username is required!")
                 continue
-        count += 1
-        while (count > 0):
+
+            # Bağlantı işlemi ve doğrulama
+            try:
+                s = Server(server, get_info=ALL)
+                c = Connection(s, user=domainName + "\\" + username, password=password, authentication=NTLM)
+                if not c.bind():
+                    if c.result["description"] == "invalidCredentials":
+                        print('[-] Username or password is incorrect. Please try again.')
+                        count = 0  # Yanlış şifre durumunda tekrar sormak için count sıfırlanıyor
+                    else:
+                        print('[-] Error in bind', c.result)
+                        sys.exit(1)
+                else:
+                    print('[+] Connection established...')
+                    is_authenticated = True  # Başarılı bağlantı durumda döngüden çıkmak için
+                    count += 1
+            except socket.error as err:
+                print('[-] Connection error, check that the target server is up or your network connection: ' + str(err))
+                print('[!] For exiting the script, please type exit or press ctrl+c')
+                continue
+
+        # İşlem kısmı
+        while count > 0:
             operation = input(Style.BRIGHT + username + '@' + domainName + ':~$ ' + Style.RESET_ALL)
-            # to exit an error loop
+            # To exit an error loop
             if operation == "exit":
                 print('[*] Exiting...')
                 sys.exit(0)
+
+            # Araç ana işlevini çağırma
             dumlupinar = dcDumlu(server, domainName, username, password, operation, searchBaseName)
             dumlupinar.main()
 
     except KeyboardInterrupt:
         print('\n[-] Exiting...')
         sys.exit(0)
-
-    except socket.error as err:
-        print('[-] Connection error, check that the target server is up or your network connection: ' + str(err))
-        print('[!] For exiting the script, please type exit or press ctrl+c')
-        continue
 
     except Exception as err:
         print('[-] ' + str(err))

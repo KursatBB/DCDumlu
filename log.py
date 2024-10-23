@@ -4,3 +4,4 @@ logging.basicConfig(filename='output.log', encoding='utf-8', level=logging.INFO,
 
 def logOperation(operation, result):
     logging.info('LDAP %s operation result: \n%s' % (operation,result))
+    logging.shutdown()
